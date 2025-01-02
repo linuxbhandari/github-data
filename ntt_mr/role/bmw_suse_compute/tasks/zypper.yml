@@ -37,4 +37,4 @@
       reboot:
         msg: "Rebooting for bios upgrades"
         post_reboot_delay: 30
-        reboot_timeout: 3600
+        reboot_timeout: 1600
