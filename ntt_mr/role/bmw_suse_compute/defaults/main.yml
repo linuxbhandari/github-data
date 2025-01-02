@@ -1,0 +1,31 @@
+---
+# defaults file for bmw_suse_compute
+prechecks: "/var/tmp/{{ ansible_hostname }}-prechecks.json"
+silence_store_in_file: "/var/tmp/{{ ansible_hostname }}-silence_ids.json"
+vlan_store_in_file: "/var/tmp/{{ ansible_hostname }}-getnets.json"
+rudder_var_file: "/etc/rudder_vars.lst"
+bmw_release: "/etc/BMW-release"
+mr_script: "/var/rudder/scripts/bin/rudderswinst-mrupdate-helper.sh"
+common_repo:
+     - BMW-Custom
+     - BMW-Internal
+     - BMW-Patch-CVE
+     - BMW-Patch-CVE-2021-3156
+     - BMW-SES
+     - BMW-SOC
+     - BMW-SOC-CUSTOM
+     - BMW-SOC-PTF
+     - BMW-Software-Splunk
+     - BMW-Software-UserSyncAgent
+     - PBIS
+sp2_repo:
+     - BMW-SLES12-SP2
+sp3_repo:
+     - BMW-SLES12-SP3
+dell_repo:
+     - BMW-FW-Dell
+     - Vendor-Dell
+lenovo_repo:
+     - BMW-FW-Lenovo
+     - Vendor-Lenovo
+repos: "{{ common_repo + ( ansible_distribution_release == '3') | ternary(sp3_repo, sp2_repo) + (ansible_system_vendor == 'Dell Inc.') | ternary(dell_repo, lenovo_repo) }}"

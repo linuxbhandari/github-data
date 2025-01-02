@@ -1,0 +1,73 @@
+---
+      - name: Gathering System facts
+        setup:
+          gather_subset:
+                   - '!all'
+                   - '!any'
+                   - facter
+                   - ohai
+                   - hardware
+                   - network
+                   - virtual
+
+      - name: System Information
+        vars:
+         msg: |
+          Date: {{ ansible_date_time.date }}
+          Hostname=: {{ ansible_hostname }}
+          OS: {{ ansible_os_family }}
+          FQDN: {{ ansible_fqdn }}
+        debug:
+          msg: "{{ msg.split('\n') }}"
+
+      - name: OS and Kernel Information
+        vars:
+         msg: |
+          Uptime: {{ ohai_uptime }}
+          Distribution: {{ ansible_distribution }}
+          Release: {{ ansible_distribution_release }}
+          Distribution_Version: {{ ansible_distribution_version }}
+          Kernel: {{ ansible_kernel }}
+          Architecture: {{ ansible_architecture }}
+        debug:
+          msg: "{{ msg.split('\n') }}"
+
+      - name: Hardware Information
+        vars:
+         msg: |
+          Core: {{ ansible_processor_vcpus }}
+          Ram: {{ ansible_memtotal_mb }}
+          BIOS_Date: {{ ansible_bios_date }}
+          BIOS_Version: {{ ansible_bios_version }}
+          Product_Name: {{ ansible_product_name }}
+          Vender: {{ ansible_system_vendor }}
+          Virtulization_Type: {{ ansible_virtualization_type }}
+        debug:
+          msg: "{{ msg.split('\n') }}"
+
+      - name: Check if a getnets file exists
+        stat:
+          path: "{{ vlan_store_in_file }}"
+        register: getnets_file_status
+        delegate_to: localhost
+
+      - block:
+          - name: Copy the getnets file on remote host
+            copy:
+              src: /global/openstack/scripts/remote_hooks/getnets
+              dest: /var/tmp/getnets
+              mode: '755'
+            become: true
+
+          - name: Get the vlan details
+            command: /var/tmp/getnets
+            changed_when: False
+            become: true
+            register: getnets_result
+
+          - name: Store the vlan details for later use
+            copy:
+              content: "{{ getnets_result.stdout_lines | to_nice_json }}"
+              dest: "{{ vlan_store_in_file }}"
+            delegate_to: localhost
+        when: not getnets_file_status.stat.exists

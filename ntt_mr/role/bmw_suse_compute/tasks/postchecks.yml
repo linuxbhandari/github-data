@@ -1,0 +1,149 @@
+---
+    - name: Check if a precheck file exists
+      stat:
+        path: "{{ prechecks }}"
+      register: prechecksfile
+      delegate_to: localhost
+
+    - name: Store prechecks before MR in a file
+      copy:
+        content: "{{ list_of_prechecks | to_nice_json }}"
+        dest: "{{ prechecks }}"
+      delegate_to: localhost
+      vars:
+          list_of_prechecks:
+             mr_version: "{{ current_mr_version_before_mr }}"
+             bios_version: "{{ ansible_bios_version }}"
+             zone: "{{ compute_status.openstack_compute_services[0].location.zone }}"
+      when: not prechecksfile.stat.exists
+
+    - name: Started MR on {{ ansible_hostname }}
+      include_tasks: zypper.yml
+      when: rudder_mr_default != current_mr_version_before_mr
+
+    - name: Gathering System facts after reboot
+      setup:
+       gather_subset:
+                 - '!all'
+                 - '!any'
+                 - '!facter'
+                 - '!network'
+                 - '!ohai'
+                 - hardware
+
+    - name: Bmw release version after reboot
+      slurp:
+        src: "{{ bmw_release }}"
+      register: bmw_release_version_after_reboot
+
+    - name: Store mr version after reboot
+      set_fact:
+        current_mr_version_after_reboot: "{{ (((bmw_release_version_after_reboot.content | b64decode).split('\n')|select('match', 'CURRENT_MR_VERSION')|list|first).split('=')|last).split('\"')[-2] }}"
+
+    - name: Get Current AZ After Reboot
+      openstack.cloud.compute_service_info:
+         binary: "nova-compute"
+         host: "{{ ansible_hostname }}"
+      register: az_zone_after_reboot
+      delegate_to: localhost
+
+    - name: Get the vlan details after reboot
+      command: /var/tmp/getnets
+      changed_when: False
+      become: true
+      register: getnets_result_after_reboot
+
+    - name: Please verify the postchecks after reboot
+      debug:
+        msg:
+         - "Latest MR_version is {{ current_mr_version_after_reboot }}, Prior is was {{ old_version['mr_version'] }}"
+         - "Latest Bios_version is {{ ansible_bios_version }}, Prior is was {{ old_version['bios_version'] }}"
+         - "Latest Zone is {{ az_zone_after_reboot.openstack_compute_services[0].location.zone }}, Prior is was {{ old_version['zone'] }}"
+      vars:
+        old_version: "{{ lookup('file', '{{ prechecks }}') | from_json }}"
+
+
+    - name: vlan details before reboot
+      debug:
+        msg: "{{ getnets_old }}"
+      vars:
+        getnets_old: "{{ lookup('file', '{{ vlan_store_in_file }}') | from_json }}"
+
+    - name: vlan details after reboot
+      debug:
+        msg: "{{ getnets_result_after_reboot.stdout_lines }}"
+
+    - name: Ensure post checks above versions
+      pause:
+       prompt: "Please run the fullcheck from install server on {{ ansible_hostname }} and ensure above versions and do acknowledge. Waiting for your input (ack/no)"
+       echo: true
+      register: ensure_post_checks
+      until: ensure_post_checks.user_input|lower == 'ack' or ensure_post_checks.user_input|lower == 'no'
+      retries: 3
+
+    - block:
+        - name: Troubleshoot
+          debug:
+            msg: Please troubleshoot manually
+
+        - name: Playbook end by user
+          meta: end_play
+      when: ensure_post_checks.user_input|lower != 'ack'
+
+    - name: Verifying the rudder services after reboot
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: True
+      become: True
+      loop:
+        - rudder-agent.service
+        - rudder-cf-execd.service
+        - rudder-cf-serverd.service
+
+    - name: Verifying the nova services after reboot
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: True
+      become: True
+      loop:
+        - openstack-neutron-l3-agent
+        - openstack-neutron-metadata-agent
+        - openstack-neutron-openvswitch-agent
+        - openstack-neutron-ovs-cleanup
+        - openstack-nova-compute
+
+    - name: Enabled compute node
+      command: "openstack compute service  set --enable {{ ansible_hostname }} nova-compute"
+      changed_when: False
+      delegate_to: localhost
+
+    - name: Gets silence ids from file
+      set_fact:
+         silence: "{{ lookup('file', '{{ silence_store_in_file }}') }}"
+      delegate_to: localhost
+      when: silence is undefined
+
+    - name: Clear silence in Alert Manager
+      include_role:
+        name: bmw_openstack.general.osak_api
+        tasks_from: clear_silence
+      vars:
+        silence_host: "{{ ansible_hostname }}"
+
+    - name: Removed precheck files
+      file:
+        path: "{{ item }}"
+        state: absent
+      delegate_to: localhost
+      with_items:
+        - "{{ prechecks }}"
+        - "{{ silence_store_in_file }}"
+        - "{{ vlan_store_in_file }}"
+
+    - name: Removed getnets file on remote host
+      file:
+        path: /var/tmp/getnets
+        state: absent
+      become: true

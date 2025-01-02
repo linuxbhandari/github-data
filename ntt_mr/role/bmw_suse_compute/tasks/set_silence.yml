@@ -1,0 +1,29 @@
+---
+    - name: Check if a silence file exists
+      stat:
+        path: "{{ silence_store_in_file }}"
+      register: silence_file_status
+      delegate_to: localhost
+
+    - block:
+        - name: Set silence in Alert Manager
+          include_role:
+            name: bmw_openstack.general.osak_api
+            tasks_from: set_silence
+          vars:
+            silence_host: "{{ ansible_hostname }}"
+            silence_duration: 3
+            silence_comment: "Rebooting compute node for Master Release Update"
+            silence_user: "mr_update_openstack"
+
+        - name: "Wait a minute for the silence to get activated"
+          wait_for:
+            timeout: 60
+          delegate_to: localhost
+
+        - name: Store the silence ids in a file
+          copy:
+            content: "{{ silence | to_nice_json }}"
+            dest: "{{ silence_store_in_file }}"
+          delegate_to: localhost
+      when: (not silence_file_status.stat.exists) or (ansible_date_time.epoch|float - silence_file_status.stat.mtime) > ( 2 * 3600)

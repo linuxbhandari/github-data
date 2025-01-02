@@ -1,0 +1,40 @@
+---
+    - name: MR is in process. IT will take sometime. Please wait...
+      command: "{{ mr_script }} --repo={{ repos | join(' --repo=') }}"
+      become: True
+      changed_when: False
+
+    - name: Store bmw_release version after mr
+      slurp:
+        src: "{{ bmw_release }}"
+      register: bmw_release_version_after_mr
+
+    - name: Store mr_version after mr
+      set_fact:
+        current_mr_version_after_mr: "{{ (((bmw_release_version_after_mr.content | b64decode).split('\n')|select('match', 'CURRENT_MR_VERSION')|list|first).split('=')|last).split('\"')[-2] }}"
+
+    - name: Verifying MR_Version
+      assert:
+        that:
+          - rudder_mr_default == current_mr_version_after_mr
+        fail_msg: MR not completed. Please check again.
+        success_msg: MR has been completed successfully and the latest MR version is {{ current_mr_version_after_mr }}
+
+    - name: Waiting for your input
+      pause:
+       prompt: "Please take the console before any action and then reboot the server for updates.. Waiting for your input (yes/no)"
+       echo: true
+      register: confirm_reboot
+      until: confirm_reboot.user_input|lower == 'yes' or confirm_reboot.user_input|lower == 'no'
+      retries: 3
+
+    - name: Playbook end by user
+      meta: end_play
+      when: confirm_reboot.user_input|lower != 'yes'
+
+    - name: Rebooting the machine to apply updates
+      become: True
+      reboot:
+        msg: "Rebooting for bios upgrades"
+        post_reboot_delay: 30
+        reboot_timeout: 3600

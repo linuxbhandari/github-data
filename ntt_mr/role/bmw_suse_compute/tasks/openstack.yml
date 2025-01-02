@@ -1,0 +1,52 @@
+---
+  - name: Check if Overcloud credentials are set
+    assert:
+      that: lookup('env', item)|length > 0
+      fail_msg: "Please make sure env var {{ item }} is set!"
+      quiet: True
+    delegate_to: localhost
+    loop:
+        - OS_USERNAME
+        - OS_PASSWORD
+        - OS_PROJECT_NAME
+        - OS_USER_DOMAIN_NAME
+
+  - name: Rudder Service Should be in running stage
+    systemd:
+      name: "{{ item }}"
+      state: started
+      enabled: True
+    become: True
+    loop:
+        - rudder-agent.service
+        - rudder-cf-execd.service
+        - rudder-cf-serverd.service
+
+  - name: Check compute status
+    openstack.cloud.compute_service_info:
+      binary: nova-compute
+      host: "{{ ansible_hostname }}"
+    register: compute_status
+    delegate_to: localhost
+
+  - name: Disabled compute node
+    command: "openstack compute service set --disable {{ ansible_hostname }}  nova-compute --disable-reason MR_in_progress"
+    changed_when: False
+    delegate_to: localhost
+    when: compute_status.openstack_compute_services[0].status == 'enabled'
+
+  - name: Get the instances count on {{ ansible_hostname }}
+    bmw_openstack.general.server_list_info:
+      all_projects: True
+      filters:
+        host: "{{ ansible_hostname }}"
+        vm_state: active
+    register: instances_count
+    delegate_to: localhost
+
+  - name: Print the number of instances
+    assert:
+      that:
+        - (instances_count.openstack_servers | length) == 0
+      success_msg: "Good! {{ ansible_hostname }} is empty."
+      fail_msg: "Bad! {{ ansible_hostname }} is not empty."

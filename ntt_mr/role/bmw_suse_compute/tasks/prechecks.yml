@@ -1,0 +1,50 @@
+---
+    - name: Check the define hosts limit
+      assert:
+        that:
+          - ( ansible_play_hosts | length ) <= 1
+        success_msg: Good to continue.
+        fail_msg: Please mention one host at a time.
+
+    - name: Check if nova Service Exits
+      stat:
+        path: /usr/lib/systemd/system/openstack-nova-compute.service
+      register: compute_service
+
+    - name: Verifying the Host
+      assert:
+        that:
+          - compute_service.stat.exists == true
+        fail_msg: This playbook only for compute nodes.
+        success_msg: Good to continue.
+
+    - name: Get default rudder release version
+      slurp:
+        src: "{{ rudder_var_file }}"
+      register: rudder_release_version
+
+    - name: Store default rudder mr version for later use
+      set_fact:
+          rudder_mr_default: "{{ (((rudder_release_version.content | b64decode).split('\"\n')| select('match', 'RUDDER_MR_DEFAULT')|list| first).split('=')|last).split('\"')|last }}"
+
+    - name: Get current bmw mr relase version
+      slurp:
+        src: "{{ bmw_release }}"
+      register: bmw_release_version
+
+    - name: Store current mr version for later use
+      set_fact:
+          current_mr_version_before_mr: "{{ (((bmw_release_version.content | b64decode).split('\n')|select('match', 'CURRENT_MR_VERSION')|list|first).split('=')|last).split('\"')[-2] }}"
+
+    - name: Verifying MR version
+      pause:
+        prompt: "MR has been updated. Current version is {{ current_mr_version_before_mr }}. Do you still want to continue (yes/no)"
+        echo: true
+      register: confirm_reboot
+      until: confirm_reboot.user_input|lower == 'yes' or confirm_reboot.user_input|lower == 'no'
+      retries: 3
+      when: rudder_mr_default == current_mr_version_before_mr
+
+    - name: Playbook end by user
+      meta: end_play
+      when: (rudder_mr_default == current_mr_version_before_mr) and (confirm_reboot.user_input|lower != 'yes')

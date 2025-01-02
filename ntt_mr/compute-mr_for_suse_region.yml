@@ -1,0 +1,6 @@
+---
+- name: Starting MR
+  hosts: all
+  gather_facts: false
+  roles:
+    - { role: bmw_suse_compute }
